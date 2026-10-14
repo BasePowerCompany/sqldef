@@ -2072,8 +2072,8 @@ func NeedsChildParen(expr Expr, parentPrec int) bool {
 	return childPrec == parentPrec && (childPrec == PrecCmp || childPrec == PrecIs)
 }
 
-func formatChild(expr Expr, parentPrec int) string {
-	rendered := String(expr)
+func (buf *nodeBuffer) formatChild(expr Expr, parentPrec int) string {
+	rendered := stringify(expr, buf.postgresStrings)
 	if NeedsChildParen(expr, parentPrec) {
 		return "(" + rendered + ")"
 	}
@@ -2087,9 +2087,9 @@ type AndExpr struct {
 
 // Format formats the node.
 func (node *AndExpr) Format(buf *nodeBuffer) {
-	buf.WriteString(formatChild(node.Left, PrecAnd))
+	buf.WriteString(buf.formatChild(node.Left, PrecAnd))
 	buf.WriteString(" and ")
-	buf.WriteString(formatChild(node.Right, PrecAnd))
+	buf.WriteString(buf.formatChild(node.Right, PrecAnd))
 }
 
 // OrExpr represents an OR expression.
@@ -2099,9 +2099,9 @@ type OrExpr struct {
 
 // Format formats the node.
 func (node *OrExpr) Format(buf *nodeBuffer) {
-	buf.WriteString(formatChild(node.Left, PrecOr))
+	buf.WriteString(buf.formatChild(node.Left, PrecOr))
 	buf.WriteString(" or ")
-	buf.WriteString(formatChild(node.Right, PrecOr))
+	buf.WriteString(buf.formatChild(node.Right, PrecOr))
 }
 
 // ConcatExpr represents a PostgreSQL string concatenation: A || B.
@@ -2122,7 +2122,7 @@ type NotExpr struct {
 // Format formats the node.
 func (node *NotExpr) Format(buf *nodeBuffer) {
 	buf.WriteString("not ")
-	buf.WriteString(formatChild(node.Expr, PrecNot))
+	buf.WriteString(buf.formatChild(node.Expr, PrecNot))
 }
 
 // ParenExpr represents a parenthesized boolean expression.
@@ -2183,7 +2183,7 @@ func NeedsAnyAllParens(right Expr) bool {
 
 // Format formats the node.
 func (node *ComparisonExpr) Format(buf *nodeBuffer) {
-	buf.WriteString(formatChild(node.Left, PrecCmp))
+	buf.WriteString(buf.formatChild(node.Left, PrecCmp))
 	buf.WriteString(" ")
 	buf.WriteString(node.Operator)
 	buf.WriteString(" ")
@@ -2195,15 +2195,15 @@ func (node *ComparisonExpr) Format(buf *nodeBuffer) {
 
 	if (node.All || node.Any) && NeedsAnyAllParens(node.Right) {
 		buf.WriteString("(")
-		buf.WriteString(String(node.Right))
+		buf.WriteString(stringify(node.Right, buf.postgresStrings))
 		buf.WriteString(")")
 	} else {
-		buf.WriteString(formatChild(node.Right, PrecCmp))
+		buf.WriteString(buf.formatChild(node.Right, PrecCmp))
 	}
 
 	if node.Escape != nil {
 		buf.WriteString(" escape ")
-		buf.WriteString(String(node.Escape))
+		buf.WriteString(stringify(node.Escape, buf.postgresStrings))
 	}
 }
 
@@ -2245,7 +2245,7 @@ const (
 
 // Format formats the node.
 func (node *IsExpr) Format(buf *nodeBuffer) {
-	buf.WriteString(formatChild(node.Expr, PrecIs))
+	buf.WriteString(buf.formatChild(node.Expr, PrecIs))
 	buf.WriteString(" ")
 	buf.WriteString(node.Operator)
 }
