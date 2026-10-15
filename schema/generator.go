@@ -157,6 +157,9 @@ type Generator struct {
 	desiredSchemas []*Schema
 	currentSchemas []*Schema
 
+	desiredSequences []*CreateSequence
+	currentSequences []*CreateSequence
+
 	desiredPrivileges []*GrantPrivilege
 	currentPrivileges []*GrantPrivilege
 
@@ -233,6 +236,8 @@ func GenerateIdempotentDDLs(mode GeneratorMode, sqlParser database.Parser, desir
 		currentExtensions:   aggregated.Extensions,
 		desiredSchemas:      desiredAggregated.Schemas,
 		currentSchemas:      aggregated.Schemas,
+		desiredSequences:    desiredAggregated.Sequences,
+		currentSequences:    aggregated.Sequences,
 		desiredPrivileges:   desiredAggregated.Privileges,
 		currentPrivileges:   aggregated.Privileges,
 		algorithm:           config.Algorithm,
@@ -272,6 +277,7 @@ func (g *Generator) generateDDLs(desiredDDLs []DDL) ([]string, error) {
 	// Other DDLs are stored in interDDLs.
 	createExtensionDDLs := []statement{}
 	createSchemaDDLs := []statement{}
+	createSequenceDDLs := []statement{}
 	interDDLs := []statement{}
 	indexDDLs := []statement{}
 	indexCommentDDLs := []statement{} // Comments on indexes must come after CREATE INDEX
@@ -467,6 +473,8 @@ func (g *Generator) generateDDLs(desiredDDLs []DDL) ([]string, error) {
 				return nil, err
 			}
 			createSchemaDDLs = append(createSchemaDDLs, rawStatements(schemaDDLs)...)
+		case *CreateSequence:
+			createSequenceDDLs = append(createSequenceDDLs, g.generateDDLsForCreateSequence(desired)...)
 		case *GrantPrivilege:
 			// Desired GRANTs for the same object, grantees, and grant option are
 			// merged into one entry of g.desiredPrivileges, which keeps the first
@@ -495,6 +503,7 @@ func (g *Generator) generateDDLs(desiredDDLs []DDL) ([]string, error) {
 	ddls := []statement{}
 	ddls = append(ddls, createExtensionDDLs...)
 	ddls = append(ddls, createSchemaDDLs...)
+	ddls = append(ddls, createSequenceDDLs...)
 	ddls = append(ddls, interDDLs...)
 	ddls = append(ddls, viewDDLs...)
 	ddls = append(ddls, metadataDDLs...)
@@ -562,6 +571,16 @@ func (g *Generator) generateDDLs(desiredDDLs []DDL) ([]string, error) {
 			g.currentTables = removeTableByName(g.currentTables, table.name.RawString())
 			g.droppedTables[table.name.RawString()] = true
 			g.droppedTableNames = append(g.droppedTableNames, table.name)
+		}
+	}
+
+	// Drop sequences no column owns after the tables that might refer to them.
+	if g.mode == GeneratorModePostgres {
+		for _, currentSequence := range g.currentSequences {
+			if g.findSequenceByName(g.desiredSequences, currentSequence.name) != nil {
+				continue
+			}
+			ddls = append(ddls, rawStatement(fmt.Sprintf("DROP SEQUENCE %s", g.escapeQualifiedName(currentSequence.name))))
 		}
 	}
 
@@ -3372,6 +3391,28 @@ func (g *Generator) generateDDLsForExtension(desired *Extension) ([]string, erro
 	return ddls, nil
 }
 
+func (g *Generator) generateDDLsForCreateSequence(desired *CreateSequence) []statement {
+	var ddls []statement
+	if g.findSequenceByName(g.currentSequences, desired.name) == nil {
+		ddls = append(ddls, rawStatement(desired.statement))
+		sequence := *desired
+		g.currentSequences = append(g.currentSequences, &sequence)
+	}
+	if g.findSequenceByName(g.desiredSequences, desired.name) == nil {
+		g.desiredSequences = append(g.desiredSequences, desired)
+	}
+	return ddls
+}
+
+func (g *Generator) findSequenceByName(sequences []*CreateSequence, name QualifiedName) *CreateSequence {
+	for _, sequence := range sequences {
+		if g.qualifiedNamesEqual(sequence.name, name) {
+			return sequence
+		}
+	}
+	return nil
+}
+
 func (g *Generator) generateDDLsForSchema(desired *Schema) ([]string, error) {
 	ddls := []string{}
 
@@ -3689,6 +3730,7 @@ type AggregatedSchema struct {
 	Comments     []*Comment
 	Extensions   []*Extension
 	Schemas      []*Schema
+	Sequences    []*CreateSequence
 	Privileges   []*GrantPrivilege
 }
 
@@ -4340,6 +4382,7 @@ func aggregateDDLsToSchema(ddls []DDL, mode GeneratorMode, defaultSchema string,
 		Comments:     []*Comment{},
 		Extensions:   []*Extension{},
 		Schemas:      []*Schema{},
+		Sequences:    []*CreateSequence{},
 		Privileges:   []*GrantPrivilege{},
 	}
 
@@ -4447,6 +4490,9 @@ func aggregateDDLsToSchema(ddls []DDL, mode GeneratorMode, defaultSchema string,
 			aggregated.Extensions = append(aggregated.Extensions, stmt)
 		case *Schema:
 			aggregated.Schemas = append(aggregated.Schemas, stmt)
+		case *CreateSequence:
+			sequence := *stmt
+			aggregated.Sequences = append(aggregated.Sequences, &sequence)
 		case *GrantPrivilege:
 			merged := false
 			for i, existing := range aggregated.Privileges {

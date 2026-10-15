@@ -194,6 +194,12 @@ func (d *PostgresDatabase) ExportDDLs() (string, error) {
 	}
 	ddls = append(ddls, domainDDLs...)
 
+	sequenceDDLs, err := d.sequences()
+	if err != nil {
+		return "", err
+	}
+	ddls = append(ddls, sequenceDDLs...)
+
 	functionDDLs, err := d.functions()
 	if err != nil {
 		return "", err
@@ -749,6 +755,70 @@ func (d *PostgresDatabase) extensions() ([]string, error) {
 		)
 	}
 	return ddls, nil
+}
+
+// sequences exports sequences that no column owns. A serial sequence (pg_depend
+// deptype 'a') and an identity sequence (deptype 'i') are recreated from the
+// column. Emitting those again would plan a second CREATE SEQUENCE.
+func (d *PostgresDatabase) sequences() ([]string, error) {
+	rows, err := d.db.Query(`
+		SELECT n.nspname,
+		       c.relname,
+		       pg_catalog.format_type(s.seqtypid, NULL),
+		       s.seqstart,
+		       s.seqincrement,
+		       s.seqmin,
+		       s.seqmax,
+		       s.seqcache,
+		       s.seqcycle
+		FROM pg_catalog.pg_sequence s
+		JOIN pg_catalog.pg_class c ON c.oid = s.seqrelid
+		JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relpersistence = 'p'
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM pg_catalog.pg_depend d
+		    WHERE d.classid = 'pg_catalog.pg_class'::regclass
+		      AND d.objid = c.oid
+		      AND d.deptype IN ('a', 'i', 'e')
+		  )
+		ORDER BY n.nspname, c.relname;
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ddls []string
+	for rows.Next() {
+		var schemaName, sequenceName, dataType string
+		var start, increment, minValue, maxValue, cache int64
+		var cycle bool
+		if err := rows.Scan(&schemaName, &sequenceName, &dataType, &start, &increment, &minValue, &maxValue, &cache, &cycle); err != nil {
+			return nil, err
+		}
+		if d.config.TargetSchema != nil && !slices.Contains(d.config.TargetSchema, schemaName) {
+			continue
+		}
+		cycleSQL := "NO CYCLE"
+		if cycle {
+			cycleSQL = "CYCLE"
+		}
+		ddls = append(ddls, fmt.Sprintf(
+			"CREATE SEQUENCE %s.%s AS %s INCREMENT BY %d MINVALUE %d MAXVALUE %d START WITH %d CACHE %d %s;",
+			d.quoteIdentifierIfNeeded(schemaName),
+			d.quoteIdentifierIfNeeded(sequenceName),
+			dataType,
+			increment,
+			minValue,
+			maxValue,
+			start,
+			cache,
+			cycleSQL,
+		))
+	}
+	return ddls, rows.Err()
 }
 
 func (d *PostgresDatabase) types() ([]string, error) {

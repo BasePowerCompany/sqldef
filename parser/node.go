@@ -556,6 +556,7 @@ type DDL struct {
 	Comment       *Comment
 	Extension     *Extension
 	Schema        *Schema
+	Sequence      *Sequence // CREATE SEQUENCE, not an identity column's options
 	Grant         *Grant
 	OwnerRole     Ident // for SetTableOwner (ALTER TABLE ... OWNER TO)
 }
@@ -607,6 +608,7 @@ const (
 	ForceRowLevelSecurity
 	NoForceRowLevelSecurity
 	SetTableOwner
+	CreateSequence
 )
 
 // View types

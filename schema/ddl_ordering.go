@@ -172,6 +172,7 @@ func topologicalSort[T any](items []T, dependencies map[string][]string, getID f
 func SortTablesByDependencies(ddls []DDL, defaultSchema string, mode GeneratorMode, legacyIgnoreQuotes bool, mysqlLowerCaseTableNames int) []DDL {
 	var createExtensions []*Extension
 	var createSchemas []*Schema
+	var createSequences []*CreateSequence
 	var createTypes []*Type
 	var createDomains []*Domain
 	var createFunctions []*Function
@@ -184,6 +185,8 @@ func SortTablesByDependencies(ddls []DDL, defaultSchema string, mode GeneratorMo
 			createExtensions = append(createExtensions, ext)
 		} else if schema, ok := ddl.(*Schema); ok {
 			createSchemas = append(createSchemas, schema)
+		} else if seq, ok := ddl.(*CreateSequence); ok {
+			createSequences = append(createSequences, seq)
 		} else if typ, ok := ddl.(*Type); ok {
 			createTypes = append(createTypes, typ)
 		} else if domain, ok := ddl.(*Domain); ok {
@@ -396,6 +399,9 @@ func SortTablesByDependencies(ddls []DDL, defaultSchema string, mode GeneratorMo
 	}
 	for _, schema := range createSchemas {
 		result = append(result, schema)
+	}
+	for _, seq := range createSequences {
+		result = append(result, seq)
 	}
 	result = append(result, sorted...)
 	result = append(result, otherDDLs...)

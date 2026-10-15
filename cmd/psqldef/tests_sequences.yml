@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=../../testutil/testcase.schema.json
+CreateStandaloneSequenceBesideSerial:
+  current: |
+    CREATE TABLE commissioning_checks (
+      id serial PRIMARY KEY
+    );
+  desired: |
+    CREATE TABLE commissioning_checks (
+      id serial PRIMARY KEY
+    );
+    CREATE SEQUENCE permitting_ia_authority_operation_seq AS integer NO CYCLE;
+  up: |
+    CREATE SEQUENCE permitting_ia_authority_operation_seq AS integer NO CYCLE;
+  down: |
+    DROP SEQUENCE "public"."permitting_ia_authority_operation_seq";
+CreateStandaloneSequence:
+  desired: |
+    CREATE SEQUENCE permitting_ia_authority_operation_seq AS integer NO CYCLE;
+  up: |
+    CREATE SEQUENCE permitting_ia_authority_operation_seq AS integer NO CYCLE;
+  down: |
+    DROP SEQUENCE "public"."permitting_ia_authority_operation_seq";

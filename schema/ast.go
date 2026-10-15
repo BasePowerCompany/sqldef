@@ -595,6 +595,13 @@ type Extension struct {
 	extension parser.Extension
 }
 
+// CreateSequence is a sequence that no column owns. Serial and identity
+// sequences are part of the column, not a separate object.
+type CreateSequence struct {
+	statement string
+	name      QualifiedName
+}
+
 type Schema struct {
 	statement string
 	schema    parser.Schema
@@ -682,6 +689,10 @@ func (t *Extension) Statement() string {
 
 func (t *Schema) Statement() string {
 	return t.statement
+}
+
+func (s *CreateSequence) Statement() string {
+	return s.statement
 }
 
 func (t *Table) PrimaryKey() *Index {

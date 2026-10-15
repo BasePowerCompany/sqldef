@@ -178,6 +178,8 @@ func (p PostgresParser) parseStmt(node *pgquery.Node) (parser.Statement, error) 
 		return p.parseAlterTableStmt(stmt.AlterTableStmt)
 	case *pgquery.Node_CreateSchemaStmt:
 		return p.parseCreateSchemaStmt(stmt.CreateSchemaStmt)
+	case *pgquery.Node_CreateSeqStmt:
+		return p.parseCreateSeqStmt(stmt.CreateSeqStmt)
 	case *pgquery.Node_CreatePolicyStmt:
 		return p.parseCreatePolicyStmt(stmt.CreatePolicyStmt)
 	case *pgquery.Node_GrantStmt:
@@ -1082,6 +1084,21 @@ func (p PostgresParser) parseTableName(relation *pgquery.RangeVar) (parser.Table
 	return parser.TableName{
 		Schema: parser.NewIdent(relation.Schemaname, false),
 		Name:   parser.NewIdent(relation.Relname, false),
+	}, nil
+}
+
+func (p PostgresParser) parseCreateSeqStmt(stmt *pgquery.CreateSeqStmt) (parser.Statement, error) {
+	if stmt.Sequence == nil {
+		return nil, fmt.Errorf("CREATE SEQUENCE without a name")
+	}
+	name, err := p.parseTableName(stmt.Sequence)
+	if err != nil {
+		return nil, err
+	}
+	return &parser.DDL{
+		Action:   parser.CreateSequence,
+		Table:    name,
+		Sequence: &parser.Sequence{},
 	}, nil
 }
 

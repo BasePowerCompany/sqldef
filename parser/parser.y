@@ -491,7 +491,7 @@ func setDDL(yylex any, ddl *DDL) {
 %type <str> or_replace_opt
 %type <boolVal> no_inherit_opt
 %type <str> identity_behavior
-%type <sequence> sequence_opt
+%type <sequence> sequence_opt create_sequence_opt
 %type <boolVal> clustered_opt not_for_replication_opt
 %type <defaultExpression> default_definition
 %type <expr> default_value_expression
@@ -2087,6 +2087,14 @@ create_statement:
     $$ = &DDL{
       Action: CreateExtension,
       Extension: &Extension{Name: $4},
+    }
+  }
+| CREATE SEQUENCE if_not_exists_opt table_name create_sequence_opt
+  {
+    $$ = &DDL{
+      Action: CreateSequence,
+      Table: $4,
+      Sequence: $5,
     }
   }
 
@@ -4391,6 +4399,84 @@ sequence_opt:
     $$ = $1
   }
 | sequence_opt OWNED BY table_id '.' reserved_sql_id
+  {
+    $1.OwnedBy = $4.Name + "." + $6.Name
+    $$ = $1
+  }
+
+// create_sequence_opt is sequence_opt plus AS data_type. AS stays out of
+// sequence_opt because that list is also the parenthesized identity options,
+// where AS already introduces IDENTITY.
+create_sequence_opt:
+  {
+    $$ = &Sequence{}
+  }
+| create_sequence_opt AS int_type_keyword
+  {
+    $1.Type = $3
+    $$ = $1
+  }
+| create_sequence_opt START WITH int_value
+  {
+    $1.StartWith = NewIntVal($4)
+    $$ = $1
+  }
+| create_sequence_opt START int_value
+  {
+    $1.StartWith = NewIntVal($3)
+    $$ = $1
+  }
+| create_sequence_opt INCREMENT BY int_value
+  {
+    $1.IncrementBy = NewIntVal($4)
+    $$ = $1
+  }
+| create_sequence_opt INCREMENT int_value
+  {
+    $1.IncrementBy = NewIntVal($3)
+    $$ = $1
+  }
+| create_sequence_opt MINVALUE int_value
+  {
+    $1.MinValue = NewIntVal($3)
+    $$ = $1
+  }
+| create_sequence_opt MAXVALUE int_value
+  {
+    $1.MaxValue = NewIntVal($3)
+    $$ = $1
+  }
+| create_sequence_opt CACHE INTEGRAL
+  {
+    $1.Cache = NewIntVal($3)
+    $$ = $1
+  }
+| create_sequence_opt NO MINVALUE
+  {
+    $1.NoMinValue = NewBoolVal(true)
+    $$ = $1
+  }
+| create_sequence_opt NO MAXVALUE
+  {
+    $1.NoMaxValue = NewBoolVal(true)
+    $$ = $1
+  }
+| create_sequence_opt NO CYCLE
+  {
+    $1.NoCycle = NewBoolVal(true)
+    $$ = $1
+  }
+| create_sequence_opt CYCLE
+  {
+    $1.Cycle = NewBoolVal(true)
+    $$ = $1
+  }
+| create_sequence_opt OWNED BY NONE
+  {
+    $1.OwnedBy = "NONE"
+    $$ = $1
+  }
+| create_sequence_opt OWNED BY table_id '.' reserved_sql_id
   {
     $1.OwnedBy = $4.Name + "." + $6.Name
     $$ = $1

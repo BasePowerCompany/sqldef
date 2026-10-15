@@ -358,6 +358,14 @@ func parseDDL(mode GeneratorMode, ddl string, stmt parser.Statement, defaultSche
 				}, nil
 			}
 			return nil, fmt.Errorf("no grantees specified in REVOKE statement")
+		} else if stmt.Action == parser.CreateSequence {
+			if mode != GeneratorModePostgres {
+				return nil, fmt.Errorf("CREATE SEQUENCE is supported for PostgreSQL only: %s", ddl)
+			}
+			return &CreateSequence{
+				statement: strings.TrimSpace(ddl),
+				name:      normalizeQualifiedName(mode, stmt.Table, defaultSchema),
+			}, nil
 		} else {
 			return nil, fmt.Errorf(
 				"unsupported type of DDL action '%d': %s",
