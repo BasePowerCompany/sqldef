@@ -1322,8 +1322,14 @@ func (g *Generator) generateDDLsForCreateTable(currentTable Table, desired Creat
 				// around the ALTER (see classifyEnumTypeChange's docstring).
 				var enumTypeChange bool
 				if !g.haveSameDataType(*currentColumn, desiredColumn) {
+					// serial is integer plus a sequence, not a type ALTER COLUMN can use.
+					// The sequence is restored after the identity change below.
+					underlyingOfDesiredSerial := isPostgresSerialType(desiredColumn.typeName) &&
+						normalizeTypeName(currentColumn.typeName, g.mode) == getSerialUnderlyingType(desiredColumn.typeName)
 					// Serial types require changing both column type and sequence type
-					if isPostgresSerialType(currentColumn.typeName) && isPostgresSerialType(desiredColumn.typeName) {
+					if underlyingOfDesiredSerial {
+						// Restored with the sequence after the identity change below.
+					} else if isPostgresSerialType(currentColumn.typeName) && isPostgresSerialType(desiredColumn.typeName) {
 						underlyingType := getSerialUnderlyingType(desiredColumn.typeName)
 						ddls = append(ddls,
 							g.alterTable(desired.table.name, alterColumnTypeAction{column: desiredColumn, serialType: underlyingType}),
@@ -1354,6 +1360,17 @@ func (g *Generator) generateDDLsForCreateTable(currentTable Table, desired Creat
 				// Step 2: When adding IDENTITY, set NOT NULL first if needed
 				if addingIdentity && !g.isPrimaryKey(*currentColumn, currentTable) && !g.notNull(*currentColumn) {
 					ddls = append(ddls, g.alterTable(desired.table.name, alterColumnNotNullAction{column: desiredColumn.name, notNull: true}))
+				}
+
+				// A serial column's nextval default is implied by the type, so it is
+				// absent from defaultDef. PostgreSQL still rejects ADD IDENTITY until
+				// that default, and the sequence that owns it, are dropped.
+				replacingSerial := addingIdentity && isPostgresSerialType(currentColumn.typeName)
+				if addingIdentity && (replacingSerial || currentColumn.defaultDef != nil) {
+					ddls = append(ddls, g.alterTable(desired.table.name, alterColumnDefaultAction{column: desiredColumn.name}))
+				}
+				if replacingSerial {
+					ddls = append(ddls, dropOwnedSequenceStatement{d: g.dialect, table: desired.table.name, column: desiredColumn.name})
 				}
 
 				// Step 3: Add or modify IDENTITY
@@ -1389,6 +1406,10 @@ func (g *Generator) generateDDLsForCreateTable(currentTable Table, desired Creat
 						}
 						ddls = append(ddls, g.alterTable(desired.table.name, action))
 					}
+				} else if addingIdentity && currentColumn.defaultDef != nil && desiredColumn.defaultDef == nil {
+					// Dropped above, before ADD IDENTITY.
+				} else if isPostgresSerialType(desiredColumn.typeName) && !isPostgresSerialType(currentColumn.typeName) {
+					ddls = append(ddls, g.restoreSerialDDLs(desired.table.name, desiredColumn.name)...)
 				} else if !g.areSameDefaultValue(currentColumn.defaultDef, desiredColumn.defaultDef, desiredColumn.typeName) {
 					// A nil default drops it.
 					action, err := g.alterColumnDefault(desiredColumn.name, desiredColumn.defaultDef)
@@ -2321,6 +2342,21 @@ func (g *Generator) generateDDLsForSetTableOwner(desired *SetTableOwner) ([]stat
 		return nil, nil
 	}
 	return nil, fmt.Errorf("ALTER TABLE ... OWNER TO is performed for inexistent table '%s': '%s'", desired.tableName.RawString(), desired.statement)
+}
+
+// restoreSerialDDLs turns an integer column back into a serial column.
+// ALTER COLUMN TYPE serial is rejected: serial is not a storage type.
+func (g *Generator) restoreSerialDDLs(table QualifiedName, column Ident) []statement {
+	schema := g.dialect.normalizeDefaultSchema(table.Schema)
+	sequence := Ident{Name: fmt.Sprintf("%s_%s_seq", table.Name.Name, column.Name), Quoted: false}
+	seqSQL := g.dialect.escapeSQLIdent(schema) + "." + g.dialect.escapeSQLIdent(sequence)
+	tableSQL := g.dialect.escapeQualifiedName(table)
+	colSQL := g.dialect.escapeSQLIdent(column)
+	return []statement{
+		rawStatement("CREATE SEQUENCE " + seqSQL),
+		rawStatement(fmt.Sprintf("ALTER TABLE %s ALTER COLUMN %s SET DEFAULT nextval('%s.%s'::regclass)", tableSQL, colSQL, schema.Name, sequence.Name)),
+		rawStatement("ALTER SEQUENCE " + seqSQL + " OWNED BY " + tableSQL + "." + colSQL),
+	}
 }
 
 func (g *Generator) shouldDropAndCreateView(currentView *View, desiredView *View) bool {

@@ -292,6 +292,22 @@ func (s alterSequenceStatement) Render() string {
 	return fmt.Sprintf("ALTER SEQUENCE %s.%s AS %s", s.d.escapeSQLIdent(schema), s.d.escapeSQLIdent(sequence), s.underlyingType)
 }
 
+// dropOwnedSequenceStatement drops the sequence a serial column created.
+// ADD GENERATED AS IDENTITY will not reuse that sequence: it creates a second
+// one (table_column_seq1) and leaves the old one behind.
+type dropOwnedSequenceStatement struct {
+	statementDefaults
+	d      dialect
+	table  QualifiedName
+	column Ident
+}
+
+func (s dropOwnedSequenceStatement) Render() string {
+	schema := s.d.normalizeDefaultSchema(s.table.Schema)
+	sequence := Ident{Name: fmt.Sprintf("%s_%s_seq", s.table.Name.Name, s.column.Name), Quoted: false}
+	return fmt.Sprintf("DROP SEQUENCE %s.%s", s.d.escapeSQLIdent(schema), s.d.escapeSQLIdent(sequence))
+}
+
 // alterTableAction is one action of an ALTER TABLE.
 type alterTableAction interface {
 	render(d dialect) string
