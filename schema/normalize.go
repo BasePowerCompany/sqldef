@@ -292,6 +292,32 @@ func isFoldableValueCastTypeName(typeStr string) bool {
 	return false
 }
 
+// smallintArrayElement keeps a ::smallint cast on an ARRAY element when
+// generating DDL. Folding 0::smallint to 0 makes the array integer[], and
+// smallint[] <@ integer[] is rejected. Comparison still folds the cast.
+func smallintArrayElement(expr parser.Expr, mode GeneratorMode) (parser.Expr, bool) {
+	if paren, ok := expr.(*parser.ParenExpr); ok {
+		kept, ok := smallintArrayElement(paren.Expr, mode)
+		if !ok {
+			return nil, false
+		}
+		return &parser.ParenExpr{Expr: kept}, true
+	}
+	cast, ok := expr.(*parser.CastExpr)
+	if !ok || cast.Type == nil {
+		return nil, false
+	}
+	switch strings.ToLower(cast.Type.Type) {
+	case "smallint", "int2":
+	default:
+		return nil, false
+	}
+	return &parser.CastExpr{
+		Expr: normalizeCheckExprWith(cast.Expr, mode, false),
+		Type: &parser.ConvertType{Type: "smallint"},
+	}, true
+}
+
 // normalizeCheckExpr normalizes a CHECK constraint expression AST for comparison.
 // mode parameter controls PostgreSQL-specific normalization (IN to ANY conversion).
 func normalizeCheckExpr(expr parser.Expr, mode GeneratorMode) parser.Expr {
@@ -546,6 +572,11 @@ func normalizeCheckExprWith(expr parser.Expr, mode GeneratorMode, forComparison 
 		}
 	case *parser.ArrayConstructor:
 		normalizedElements := util.TransformSlice(e.Elements, func(elem parser.Expr) parser.Expr {
+			if !forComparison {
+				if kept, ok := smallintArrayElement(elem, mode); ok {
+					return kept
+				}
+			}
 			return recur(elem, mode)
 		})
 		return &parser.ArrayConstructor{Elements: normalizedElements}

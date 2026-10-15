@@ -3045,3 +3045,20 @@ CheckBooleanEqualityAndNestedOr:
   down: |
     ALTER TABLE "public"."tickets" DROP CONSTRAINT "both_or_neither";
     ALTER TABLE "public"."tickets" DROP CONSTRAINT "growth_status_reason_valid";
+
+# 0::smallint inside ARRAY must stay smallint. Folding it to 0 makes the
+# array integer[], and smallint[] <@ integer[] is rejected.
+CheckSmallintArrayCast:
+  current: |
+    CREATE TABLE shifts (
+      weekdays smallint[]
+    );
+  desired: |
+    CREATE TABLE shifts (
+      weekdays smallint[],
+      CONSTRAINT shifts_weekdays_check CHECK (weekdays <@ ARRAY[0::smallint, 1::smallint, 6::smallint])
+    );
+  up: |
+    ALTER TABLE "public"."shifts" ADD CONSTRAINT "shifts_weekdays_check" CHECK (weekdays <@ ARRAY[0::smallint, 1::smallint, 6::smallint]);
+  down: |
+    ALTER TABLE "public"."shifts" DROP CONSTRAINT "shifts_weekdays_check";
