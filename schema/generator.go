@@ -2359,6 +2359,10 @@ func (g *Generator) restoreSerialDDLs(table QualifiedName, column Ident) []state
 	}
 }
 
+func isPostgresViewRelation(viewType string) bool {
+	return viewType == "VIEW" || viewType == "MATERIALIZED VIEW"
+}
+
 func (g *Generator) shouldDropAndCreateView(currentView *View, desiredView *View) bool {
 	if g.mode == GeneratorModeSQLite3 || g.mode == GeneratorModeMssql {
 		return true
@@ -2423,6 +2427,28 @@ func (g *Generator) generateDDLsForCreateView(desiredView *View) ([]string, erro
 			view.indexes = nil
 		}
 		g.currentViews = append(g.currentViews, &view)
+	} else if g.mode == GeneratorModePostgres && currentView.viewType != desiredView.viewType &&
+		isPostgresViewRelation(currentView.viewType) && isPostgresViewRelation(desiredView.viewType) {
+		// CREATE OR REPLACE cannot change a view into a materialized view, or
+		// the reverse. An equal SELECT would otherwise leave the old kind in place.
+		viewName := g.escapeViewName(desiredView)
+		var recreateDDLs []string
+		for _, depView := range slices.Backward(g.findDependentViews(desiredView.name)) {
+			recreateDDLs = append(recreateDDLs, fmt.Sprintf("DROP %s %s", depView.viewType, g.escapeViewName(depView)))
+			key := normalizeNameKey(depView.name, g.defaultSchema, g.mode, g.legacyIgnoreQuotes, g.config.MysqlLowerCaseTableNames)
+			g.recreatedViews[key] = depView
+			g.forgetViewMetadata(depView)
+			g.currentViews = slices.DeleteFunc(g.currentViews, func(v *View) bool { return v == depView })
+		}
+		recreateDDLs = append(recreateDDLs,
+			fmt.Sprintf("DROP %s %s", currentView.viewType, viewName),
+			g.createViewDDL(desiredView),
+		)
+		g.forgetViewMetadata(currentView)
+		if ownerDDL := g.restoreViewOwnerDDL(currentView); ownerDDL != "" {
+			recreateDDLs = append(recreateDDLs, ownerDDL)
+		}
+		ddls, _ = g.appendRecreate(ddls, recreateDDLs...)
 	} else if desiredView.viewType == "VIEW" { // TODO: Fix the definition comparison for materialized views and enable this
 		// View found. If it's different, create or replace view.
 		// Use AST-based comparison with table lookup for SELECT * expansion

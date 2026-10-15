@@ -104,6 +104,22 @@ CreateMaterializedView:
       SELECT p.id FROM (posts as p JOIN users as u ON ((p.user_id = u.id)));
   down: |
     DROP MATERIALIZED VIEW "public"."view_user_posts";
+# A materialized view and a plain view are different relations. CREATE OR
+# REPLACE cannot change one into the other, and an equal query must not leave
+# the old kind in place.
+ReplaceMaterializedViewWithView:
+  current: |
+    CREATE TABLE homesites (id bigint);
+    CREATE MATERIALIZED VIEW mv_homebuilder_latest_homesites AS SELECT id FROM homesites;
+  desired: |
+    CREATE TABLE homesites (id bigint);
+    CREATE VIEW mv_homebuilder_latest_homesites AS SELECT id FROM homesites;
+  up: |
+    DROP MATERIALIZED VIEW "public"."mv_homebuilder_latest_homesites";
+    CREATE VIEW "public"."mv_homebuilder_latest_homesites" AS select id from homesites;
+  down: |
+    DROP VIEW "public"."mv_homebuilder_latest_homesites";
+    CREATE MATERIALIZED VIEW "public"."mv_homebuilder_latest_homesites" AS select id from homesites;
 DropMaterializedView:
   current: |
     CREATE TABLE points (id bigint);
